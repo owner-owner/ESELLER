@@ -16,7 +16,7 @@ const BOT_CONFIG = {
   username: 'atiolp', 
 };
 
-const RECONNECT_DELAY_MS = 5000; 
+const RECONNECT_DELAY_MS = 10000; 
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 let afkResetTimeout: ReturnType<typeof setTimeout> | null = null;
 let spawnTimeout: ReturnType<typeof setTimeout> | null = null; // 👈 متغير جديد لحفظ مؤقت الـ 7 ثوانٍ
