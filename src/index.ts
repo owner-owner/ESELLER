@@ -1,40 +1,27 @@
 import mineflayer from 'mineflayer';
 import express from 'express';
 
-// 1. إعداد سيرفر Express لإبقاء Render شغالاً
-const PORT = parseInt(process.env.PORT || '10000', 10);
+const PORT = process.env.PORT || '10000';
 const app = express();
-app.get('/', (_req, res) => res.status(200).send('Seller Bot Active'));
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Express] Server running on port ${PORT}`);
-});
+app.get('/', (_req, res) => res.status(200).send('Bot Active'));
+app.listen(PORT, '0.0.0.0');
 
-// منع انهيار العملية عند حدوث أخطاء قراءة الحزم
-process.on('uncaughtException', (err: Error) => {
-  if (err.message.includes('abnormally large') || err.message.includes('Chunk size') || err.message.includes('Read error')) {
-    console.log('[Seller-Bot] 🛡️ تم التقاط وتجاهل خطأ حزمة عابر لتفادي الخروج.');
-  } else {
-    console.error('[UncaughtException]', err);
-  }
-});
-
-// 2. إعدادات بوت البيع
 const BOT_CONFIG = {
   host: 'zero7even.net',
   port: 25565,
   username: 'EDKF875HD',
-  version: '1.20.4',
 };
 
 const RECONNECT_DELAY_MS = 5000;
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-let antiAfkInterval: ReturnType<typeof setInterval> | null = null;
+let afkResetTimeout: ReturnType<typeof setTimeout> | null = null;
+let mainInterval: ReturnType<typeof setInterval> | null = null;
 
-function scheduleReconnect(reason: string) {
-  console.log(`[Seller-Bot] 🔄 إعادة الاتصال خلال 5 ثوانٍ بسبب: ${reason}`);
+const THREE_HOURS_MS = 10500000;
+
+function scheduleReconnect() {
   if (reconnectTimeout) return;
-  if (antiAfkInterval) clearInterval(antiAfkInterval);
-
+  if (mainInterval) clearInterval(mainInterval);
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     startBot();
@@ -42,86 +29,115 @@ function scheduleReconnect(reason: string) {
 }
 
 function startBot() {
-  console.log('[Seller-Bot] ⏳ جاري بدء الاتصال بالسيرفر zero7even.net...');
-
   const bot = mineflayer.createBot({
     ...BOT_CONFIG,
     viewDistance: 'tiny',
-    physicsEnabled: true,
-    checkTimeoutInterval: 60 * 1000
+    physicsEnabled: false
   });
 
-  bot.on('login', () => {
-    console.log('[Seller-Bot] ✅ تم الاتصال بالهوست وقبول الحساب!');
-  });
+  // دالة البيع المضمونة والمحدثة لـ Mineflayer 4.23.0
+  async function forceNormalClickSell(window: any) {
+    // مصفوفة تعبر عن حالة أول 45 خانة في الصندوق (من 0 إلى 44)
+    // نعتبر الخانة فارغة (true) إذا لم يكن بها آيتم في السيرفر
+    const availableChestSlots: boolean[] = [];
+    for (let i = 0; i < 45; i++) {
+      availableChestSlots[i] = window.slots[i] === null || window.slots[i] === undefined;
+    }
 
-  // 💰 دالة تنفيذ أمر البيع
-  function triggerSell() {
-    console.log('[Seller-Bot] 💰 تم التقاط أغراض! جاري كتابة أمر /sell...');
-    bot.chat('/sell');
+    let currentTargetChestSlot = 0;
+
+    // خانات جيب اللاعب الثابتة داخل النافذة المفتوحة تبدأ من 54 إلى 89
+    // (حيث أن الصندوق يأخذ الخانات من 0 إلى 53)
+    const playerInventoryStartInWindow = 54;
+    const playerInventoryEndInWindow = 89;
+
+    for (let slotId = playerInventoryStartInWindow; slotId <= playerInventoryEndInWindow; slotId++) {
+      const item = window.slots[slotId];
+
+      // إذا وجدت خانة بها غرض في حقيبتك
+      if (item) {
+        // البحث عن أول خانة بيع فارغة متاحة في الصندوق من 0 إلى 44
+        while (currentTargetChestSlot < 45 && !availableChestSlots[currentTargetChestSlot]) {
+          currentTargetChestSlot++;
+        }
+
+        // إذا تملأت أول 45 خانة بيع تماماً، نتوقف فوراً
+        if (currentTargetChestSlot >= 45) {
+          break;
+        }
+
+        try {
+          // 1. النقر كليك يسار عادي لالتقاط الآيتم على الماوس
+          await bot.clickWindow(slotId, 0, 0);
+          await new Promise(resolve => setTimeout(resolve, 200)); // مهلة انتظار لاستجابة السيرفر
+
+          // 2. النقر كليك يسار عادي في خانة البيع الفارغة بالصندوق لإفلات الآيتم
+          await bot.clickWindow(currentTargetChestSlot, 0, 0);
+          
+          // تحديث حالة الخانة بأنها أصبحت ممتلئة الآن
+          availableChestSlots[currentTargetChestSlot] = false;
+
+          // 3. انتظر مهلة الأمان المطلوبة (200ms) قبل الانتقال للآيتم التالي
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (err) {
+          // في حال حدوث أي خطأ مفاجئ، نقوم بإفلات الآيتم العالق في الماوس لئلا يخرب الدورة
+          if (bot.inventory.cursor) {
+            await bot.clickWindow(slotId, 0, 0).catch(() => {});
+          }
+        }
+      }
+    }
+
+    // إغلاق النافذة تلقائياً بعد الانتهاء بثانية واحدة
+    setTimeout(() => {
+      try {
+        bot.closeWindow(window);
+      } catch (e) {}
+    }, 1000);
   }
 
-  // 🛒 مراقبة التقاط الأغراض فور ورودها للحقيبة
-  bot.on('playerCollect', (collector) => {
-    if (collector.username === bot.username) {
-      setTimeout(() => {
-        triggerSell();
-      }, 500);
-    }
+  // لقط فتح واجهة الـ /sell وتفعيل نظام الكليك العادي
+  bot.on('windowOpen', (window) => {
+    setTimeout(() => {
+      forceNormalClickSell(window);
+    }, 2000); // انتظار ثانيتين لضمان استقرار الواجهة في السيرفر
   });
 
-  // 🔑 إدارة الدخول، التسجيل، والموافقة على الانتقال التلقائي
   bot.on('message', (jsonMsg) => {
     const text = jsonMsg.toString();
-    console.log(`[Chat] ${text}`);
-
-    const lowerText = text.toLowerCase();
-
-    // الموافقة الفورية على طلب الانتقال التلقائي عند رؤية AZSRGDTS34245
-    if (text.includes('AZSRGDTS34245')) {
-      console.log('[Seller-Bot] 🚀 تم رصد الرسالة AZSRGDTS34245! جاري إرسال /tpaccept...');
-      bot.chat('/tpaccept');
-    }
-
-    // التسجيل والدخول
-    if (lowerText.includes('/register') || lowerText.includes('register')) {
-      console.log('[Seller-Bot] 🔑 جاري إرسال أمر التسجيل /register...');
-      bot.chat('/register AZERTY65 AZERTY65');
-    } else if (lowerText.includes('/login') || lowerText.includes('login') || lowerText.includes('تسجيل الدخول')) {
-      console.log('[Seller-Bot] 🔑 جاري إرسال أمر تسجيل الدخول /login...');
+    if (text.includes('login') || text.includes('/login') || text.includes('تسجيل الدخول')) {
       bot.chat('/login AZERTY65');
     }
-  });
-
-  // 🌐 عند رسبونة البوت داخل السيرفر
-  bot.on('spawn', () => {
-    console.log('[Seller-Bot] 🎉 البوت جاهز ويراقب الحقيبة والشات!');
-
-    if (antiAfkInterval) clearInterval(antiAfkInterval);
-
-    // قفز خفيف كل 30 ثانية لتفادي طرد الـ AFK
-    antiAfkInterval = setInterval(() => {
-      bot.setControlState('jump', true);
-      setTimeout(() => bot.setControlState('jump', false), 500);
-    }, 30000);
-  });
-
-  bot.on('kicked', (reason) => {
-    let readableReason = reason;
-    try {
-      readableReason = typeof reason === 'object' ? JSON.stringify(reason) : reason;
-    } catch (e) {}
-    scheduleReconnect(`Kicked: ${readableReason}`);
-  });
-
-  bot.on('end', (reason) => scheduleReconnect(`Disconnected: ${reason}`));
-
-  bot.on('error', (err) => {
-    console.log('[Seller-Bot] ⚠️ تنبيه خطأ:', err.message);
-    if (!err.message.includes('abnormally large') && !err.message.includes('Chunk size')) {
-      scheduleReconnect(`Error: ${err.message}`);
+    if (text.includes('وضع - AFK') || text.includes('AFK mode') || text.includes('successfully')) {
+      if (afkResetTimeout) clearTimeout(afkResetTimeout);
+      afkResetTimeout = setTimeout(() => {
+        if (mainInterval) clearInterval(mainInterval);
+        bot.quit();
+      }, THREE_HOURS_MS);
     }
   });
+
+  bot.on('spawn', () => {
+    if (mainInterval) clearInterval(mainInterval);
+    
+    setTimeout(() => {
+      bot.setControlState('sneak', true);
+
+      // إرسال أمر البيع كل 30 ثانية
+      mainInterval = setInterval(() => {
+        if (!bot.currentWindow) {
+          bot.chat('/sell');
+        }
+      }, 30000);
+
+      bot.chat('/sell');
+
+    }, 5000);
+  });
+
+  bot.on('kicked', () => scheduleReconnect());
+  bot.on('end', () => scheduleReconnect());
+  bot.on('error', () => scheduleReconnect());
 }
 
 startBot();
