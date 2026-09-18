@@ -124,7 +124,7 @@ function startBot() {
     }, getRandomDelay(1800, 2200));
   });
 
-  // إدارة الرسائل والشات (الاشتراكات، التسجيل، الـ TPAccept، والرد التمويهي)
+  // إدارة الرسائل والشات (الاشتراكات، التسجيل، والـ TPAccept)
   bot.on('message', (jsonMsg) => {
     const text = jsonMsg.toString();
     console.log(`[Chat] ${text}`);
@@ -142,15 +142,6 @@ function startBot() {
       bot.chat('/register AZERTY65 AZERTY65');
     } else if (lowerText.includes('/login') || lowerText.includes('login') || lowerText.includes('تسجيل الدخول')) {
       bot.chat('/login AZERTY65');
-    }
-
-    // 💬 تمويه الأدمن: رد عشوائي إذا ذكر اسم البوت في الشات
-    if (text.includes(bot.username) && !text.includes(`${bot.username}:`)) {
-      const replies = ['?', 'what', 'wait', 'sec', 'huh'];
-      const randomReply = replies[Math.floor(Math.random() * replies.length)];
-      setTimeout(() => {
-        bot.chat(randomReply);
-      }, getRandomDelay(2000, 4000));
     }
   });
 
