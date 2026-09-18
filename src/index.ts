@@ -13,7 +13,7 @@ app.listen(parseInt(PORT, 10), '0.0.0.0', () => {
 const BOT_CONFIG = {
   host: 'zero7even.net',
   port: 25565,
-  username: 'EDKF875HD',
+  username: 'RISZFG',
 };
 
 const RECONNECT_DELAY_MS = 5000;
